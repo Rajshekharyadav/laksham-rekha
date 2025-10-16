@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { parseSchemesCSV, parseCrimePDF, getStateCoordinates } from "./lib/data-parser";
+import { parseSchemesCSV, parseCrimePDF, parseComprehensiveCrimeCSV, parseDisasterCSV, getStateCoordinates, getDistrictCoordinates, type DisasterData } from "./lib/data-parser";
 import { analyzeSafetyRisk, getCropRecommendations, predictDisasterRisk } from "./lib/gemini";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
@@ -9,22 +9,51 @@ import { insertUserSchema } from "@shared/schema";
 // Cache for parsed data
 let schemesCache: any[] = [];
 let crimeDataCache: any[] = [];
+let disasterDataCache: DisasterData[] = [];
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize data on server start
   try {
     schemesCache = await parseSchemesCSV();
-    const crimeData = await parseCrimePDF();
-    crimeDataCache = crimeData.map(crime => ({
-      ...crime,
-      location: getStateCoordinates(crime.state),
-    }));
-    console.log(`✅ Loaded ${schemesCache.length} schemes and ${crimeDataCache.length} crime zones`);
+    const crimeData = await parseComprehensiveCrimeCSV();
+    disasterDataCache = await parseDisasterCSV();
+    
+    crimeDataCache = crimeData.map(crime => {
+      const location = crime.district 
+        ? getDistrictCoordinates(crime.state, crime.district)
+        : getStateCoordinates(crime.state);
+      
+      return {
+        ...crime,
+        location,
+      };
+    });
+    
+    // Add Chandigarh University as test red zone
+    crimeDataCache.push({
+      state: 'PUNJAB',
+      district: 'CHANDIGARH UNIVERSITY',
+      year: 2024,
+      rape: 5000,
+      kidnapping: 3000,
+      dowryDeath: 500,
+      assaultOnWomen: 4000,
+      assaultOnModesty: 2500,
+      domesticViolence: 6000,
+      trafficking: 500,
+      totalCrimes: 21500,
+      riskLevel: 'critical',
+      highestCrimeType: 'Domestic Violence',
+      highestCrimeCount: 6000,
+      location: { lat: 30.7333, lng: 76.7794 }
+    });
+    
+    console.log(`✅ Loaded ${schemesCache.length} schemes, ${crimeDataCache.length} crime zones, and ${disasterDataCache.length} disaster records`);
   } catch (error) {
     console.error('❌ Data loading error:', error);
-    // Set fallback data to prevent crashes
     schemesCache = [];
     crimeDataCache = [];
+    disasterDataCache = [];
   }
 
   // POST /api/auth/signup - User registration
@@ -263,11 +292,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/weather", async (req, res) => {
     try {
       const { lat, lng, location } = req.query;
-      const apiKey = process.env.OPENWEATHER_API_KEY;
+      const apiKey = process.env.WEATHER_API_KEY;
       
       if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY_HERE') {
         console.log('Using fallback weather data - API key not configured');
-        // Fallback weather data
         return res.json({
           location: location || 'New Delhi, IN',
           temperature: 28,
@@ -304,7 +332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         condition: data.weather[0].main,
         description: data.weather[0].description,
         humidity: data.main.humidity,
-        windSpeed: Math.round(data.wind.speed * 3.6), // Convert m/s to km/h
+        windSpeed: Math.round(data.wind.speed * 3.6),
         pressure: data.main.pressure,
         visibility: data.visibility ? Math.round(data.visibility / 1000) : null,
         icon: data.weather[0].icon,
@@ -315,7 +343,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Weather API error:', error);
       const { lat, lng, location } = req.query;
-      // Return fallback data on error
       res.json({
         location: (location as string) || 'New Delhi, IN',
         temperature: 28,
@@ -328,6 +355,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
         icon: '01d',
         coords: { lat: parseFloat((lat as string) || '28.7041'), lng: parseFloat((lng as string) || '77.1025') }
       });
+    }
+  });
+
+  // GET /api/weather/forecast - Get 5-day forecast  
+  app.get("/api/weather/forecast", async (req, res) => {
+    try {
+      const { lat, lng, location } = req.query;
+      const apiKey = process.env.WEATHER_API_KEY;
+      
+      if (!apiKey) {
+        return res.json({ forecast: [] });
+      }
+      
+      let forecastUrl;
+      if (lat && lng) {
+        forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lng}&appid=${apiKey}&units=metric`;
+      } else if (location) {
+        forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?q=${location}&appid=${apiKey}&units=metric`;
+      } else {
+        forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?q=New Delhi&appid=${apiKey}&units=metric`;
+      }
+      
+      const response = await fetch(forecastUrl);
+      if (!response.ok) {
+        throw new Error('Weather forecast API request failed');
+      }
+      
+      const data = await response.json();
+      const forecast = data.list.slice(0, 40).map((item: any) => ({
+        date: item.dt_txt,
+        temperature: Math.round(item.main.temp),
+        condition: item.weather[0].main,
+        description: item.weather[0].description,
+        humidity: item.main.humidity,
+        windSpeed: Math.round(item.wind.speed * 3.6),
+        icon: item.weather[0].icon
+      }));
+      
+      res.json({ forecast });
+    } catch (error) {
+      console.error('Weather forecast API error:', error);
+      res.json({ forecast: [] });
+    }
+  });
+
+  // GET /api/disasters - Get disaster history
+  app.get("/api/disasters", async (req, res) => {
+    try {
+      const { location, type, riskLevel, limit = 50 } = req.query;
+      
+      let filtered = [...disasterDataCache];
+      
+      if (location) {
+        const searchLower = (location as string).toLowerCase();
+        filtered = filtered.filter(d => 
+          d.location.toLowerCase().includes(searchLower)
+        );
+      }
+      
+      if (type && type !== 'all') {
+        filtered = filtered.filter(d => 
+          d.disasterType === type || d.disasterSubtype === type
+        );
+      }
+      
+      if (riskLevel && riskLevel !== 'all') {
+        filtered = filtered.filter(d => d.riskLevel === riskLevel);
+      }
+      
+      res.json(filtered.slice(0, parseInt(limit as string)));
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch disasters' });
     }
   });
 

@@ -32,6 +32,7 @@ import {
 
 interface CrimeData {
   state: string;
+  district?: string;
   year: number;
   rape: number;
   kidnapping: number;
@@ -103,7 +104,8 @@ export default function WomenSafety() {
   // Filter crime zones
   const filteredCrimes = crimeZones.filter(zone => {
     const matchesSearch = searchQuery === '' || 
-      zone.state.toLowerCase().includes(searchQuery.toLowerCase());
+      zone.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (zone.district && zone.district.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesRisk = riskFilter === 'all' || zone.riskLevel === riskFilter;
     return matchesSearch && matchesRisk;
   });
@@ -284,11 +286,15 @@ export default function WomenSafety() {
             {!crimesLoading && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredCrimes.map((zone, index) => (
-                  <Card key={zone.state} className="card-3d group relative overflow-hidden animate-slide-up hover-elevate" style={{animationDelay: `${index * 0.05}s`}} data-testid={`card-crime-${index}`}>
+                  <Card key={`${zone.state}-${zone.district || index}`} className="card-3d group relative overflow-hidden animate-slide-up hover-elevate" style={{animationDelay: `${index * 0.05}s`}} data-testid={`card-crime-${index}`}>
                     <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     <CardHeader className="space-y-3 relative z-10">
                       <div className="flex items-start justify-between gap-2">
-                        <CardTitle className="text-lg leading-tight">{zone.state}</CardTitle>
+                        <div className="flex-1">
+                          <CardTitle className="text-lg leading-tight">
+                            {zone.district ? `${zone.district}, ${zone.state}` : zone.state}
+                          </CardTitle>
+                        </div>
                         <Badge variant={getRiskBadgeVariant(zone.riskLevel)} className="shrink-0">
                           {zone.riskLevel.toUpperCase()}
                         </Badge>

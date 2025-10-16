@@ -18,18 +18,33 @@ export interface SchemeData {
 
 export interface CrimeData {
   state: string;
+  district?: string;
   year: number;
-  rape: number;  // Rape cases
-  kidnapping: number;  // Kidnapping & Abduction (K&A)
-  dowryDeath: number;  // Dowry Deaths (DD)
-  assaultOnWomen: number;  // Assault on Women (AoW)
-  assaultOnModesty: number;  // Assault on Modesty (AoM)
-  domesticViolence: number;  // Domestic Violence (DV)
-  trafficking: number;  // Women Trafficking (WT)
+  rape: number;
+  kidnapping: number;
+  dowryDeath: number;
+  assaultOnWomen: number;
+  assaultOnModesty: number;
+  domesticViolence: number;
+  trafficking: number;
   totalCrimes: number;
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
   highestCrimeType: string;
   highestCrimeCount: number;
+}
+
+export interface DisasterData {
+  location: string;
+  state?: string;
+  disasterType: string;
+  disasterSubtype: string;
+  year: number;
+  month?: number;
+  deaths: number;
+  affected: number;
+  latitude?: number;
+  longitude?: number;
+  riskLevel: 'low' | 'moderate' | 'high' | 'severe';
 }
 
 // Parse schemes CSV (simple format: name, description alternating lines)
@@ -128,6 +143,178 @@ function determineCategoryFromName(name: string): string {
   }
   
   return 'General';
+}
+
+// Parse comprehensive crime CSV data (2001-2014)
+export async function parseComprehensiveCrimeCSV(): Promise<CrimeData[]> {
+  const csvPath = path.join(process.cwd(), 'attached_assets', 'crimes_against_women_2001-2014_1760601891621.csv');
+  
+  try {
+    if (!fs.existsSync(csvPath)) {
+      console.warn('Comprehensive crime CSV not found, using fallback');
+      return getFallbackCrimeData();
+    }
+    
+    const fileContent = fs.readFileSync(csvPath, 'utf-8');
+    const result = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true
+    });
+    
+    const crimeData: CrimeData[] = [];
+    const stateDistrictMap = new Map<string, CrimeData[]>();
+    
+    for (const row of result.data as any[]) {
+      if (!row['STATE/UT'] || !row.Year) continue;
+      
+      const state = String(row['STATE/UT']).toUpperCase().trim();
+      const district = row.DISTRICT ? String(row.DISTRICT).toUpperCase().trim() : undefined;
+      const year = parseInt(row.Year);
+      
+      const rape = parseInt(row.Rape) || 0;
+      const kidnapping = parseInt(row['Kidnapping and Abduction']) || 0;
+      const dowryDeath = parseInt(row['Dowry Deaths']) || 0;
+      const assaultOnWomen = parseInt(row['Assault on women with intent to outrage her modesty']) || 0;
+      const assaultOnModesty = parseInt(row['Insult to modesty of Women']) || 0;
+      const domesticViolence = parseInt(row['Cruelty by Husband or his Relatives']) || 0;
+      const trafficking = parseInt(row['Importation of Girls']) || 0;
+      
+      const totalCrimes = rape + kidnapping + dowryDeath + assaultOnWomen + 
+                          assaultOnModesty + domesticViolence + trafficking;
+      
+      if (totalCrimes === 0) continue;
+      
+      const crimes = [
+        { type: 'Rape', count: rape },
+        { type: 'Kidnapping & Abduction', count: kidnapping },
+        { type: 'Dowry Deaths', count: dowryDeath },
+        { type: 'Assault on Women', count: assaultOnWomen },
+        { type: 'Assault on Modesty', count: assaultOnModesty },
+        { type: 'Domestic Violence', count: domesticViolence },
+        { type: 'Trafficking', count: trafficking }
+      ];
+      const highestCrime = crimes.reduce((max, crime) => 
+        crime.count > max.count ? crime : max
+      );
+      
+      let riskLevel: 'low' | 'medium' | 'high' | 'critical';
+      if (totalCrimes < 500) riskLevel = 'low';
+      else if (totalCrimes < 2000) riskLevel = 'medium';
+      else if (totalCrimes < 5000) riskLevel = 'high';
+      else riskLevel = 'critical';
+      
+      const crimeEntry: CrimeData = {
+        state,
+        district,
+        year,
+        rape,
+        kidnapping,
+        dowryDeath,
+        assaultOnWomen,
+        assaultOnModesty,
+        domesticViolence,
+        trafficking,
+        totalCrimes,
+        riskLevel,
+        highestCrimeType: highestCrime.type,
+        highestCrimeCount: highestCrime.count
+      };
+      
+      const key = district ? `${state}:${district}` : state;
+      if (!stateDistrictMap.has(key)) {
+        stateDistrictMap.set(key, []);
+      }
+      stateDistrictMap.get(key)!.push(crimeEntry);
+    }
+    
+    // Get the latest year data for each state/district
+    for (const [key, entries] of Array.from(stateDistrictMap.entries())) {
+      const latest = entries.reduce((max: CrimeData, entry: CrimeData) => 
+        entry.year > max.year ? entry : max
+      );
+      crimeData.push(latest);
+    }
+    
+    console.log(`✅ Parsed ${crimeData.length} crime records from comprehensive dataset`);
+    return crimeData.length > 0 ? crimeData : getFallbackCrimeData();
+  } catch (error) {
+    console.error('Comprehensive crime CSV parsing error:', error);
+    return getFallbackCrimeData();
+  }
+}
+
+// Parse disaster CSV data
+export async function parseDisasterCSV(): Promise<DisasterData[]> {
+  const csvPath = path.join(process.cwd(), 'attached_assets', 'disasterIND_1760601997610.csv');
+  
+  try {
+    if (!fs.existsSync(csvPath)) {
+      console.warn('Disaster CSV not found, using fallback');
+      return [];
+    }
+    
+    const fileContent = fs.readFileSync(csvPath, 'utf-8');
+    const result = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true
+    });
+    
+    const disasterData: DisasterData[] = [];
+    const locationMap = new Map<string, DisasterData[]>();
+    
+    for (const row of result.data as any[]) {
+      if (!row['Disaster Type'] || !row['Start Year']) continue;
+      
+      const location = row.Location ? String(row.Location).trim() : 'Unknown';
+      const disasterType = String(row['Disaster Type']).trim();
+      const disasterSubtype = row['Disaster Subtype'] ? String(row['Disaster Subtype']).trim() : disasterType;
+      const year = parseInt(row['Start Year']);
+      const month = row['Start Month'] ? parseInt(row['Start Month']) : undefined;
+      const deaths = parseFloat(row['Total Deaths']) || 0;
+      const affected = parseFloat(row['Total Affected']) || parseFloat(row['No. Affected']) || 0;
+      const latitude = row.Latitude ? parseFloat(row.Latitude) : undefined;
+      const longitude = row.Longitude ? parseFloat(row.Longitude) : undefined;
+      
+      let riskLevel: 'low' | 'moderate' | 'high' | 'severe';
+      if (deaths < 10 && affected < 1000) riskLevel = 'low';
+      else if (deaths < 100 && affected < 10000) riskLevel = 'moderate';
+      else if (deaths < 1000 && affected < 100000) riskLevel = 'high';
+      else riskLevel = 'severe';
+      
+      const disasterEntry: DisasterData = {
+        location,
+        disasterType,
+        disasterSubtype,
+        year,
+        month,
+        deaths,
+        affected,
+        latitude,
+        longitude,
+        riskLevel
+      };
+      
+      if (!locationMap.has(location)) {
+        locationMap.set(location, []);
+      }
+      locationMap.get(location)!.push(disasterEntry);
+    }
+    
+    // Get all disasters, sorted by year (most recent first)
+    for (const entries of Array.from(locationMap.values())) {
+      disasterData.push(...entries);
+    }
+    
+    disasterData.sort((a, b) => b.year - a.year);
+    
+    console.log(`✅ Parsed ${disasterData.length} disaster records`);
+    return disasterData;
+  } catch (error) {
+    console.error('Disaster CSV parsing error:', error);
+    return [];
+  }
 }
 
 // Parse crime data from PDF - using actual dataset structure
@@ -246,7 +433,7 @@ function getFallbackCrimeData(): CrimeData[] {
   ];
 }
 
-// Map state to approximate coordinates (simplified)
+// Map state to approximate coordinates (comprehensive)
 export function getStateCoordinates(state: string): { lat: number; lng: number } {
   const stateCoords: Record<string, { lat: number; lng: number }> = {
     'DELHI': { lat: 28.7041, lng: 77.1025 },
@@ -259,8 +446,61 @@ export function getStateCoordinates(state: string): { lat: number; lng: number }
     'GUJARAT': { lat: 22.2587, lng: 71.1924 },
     'PUNJAB': { lat: 31.1471, lng: 75.3412 },
     'RAJASTHAN': { lat: 27.0238, lng: 74.2179 },
+    'ANDHRA PRADESH': { lat: 15.9129, lng: 79.7400 },
+    'ASSAM': { lat: 26.2006, lng: 92.9376 },
+    'CHHATTISGARH': { lat: 21.2787, lng: 81.8661 },
+    'GOA': { lat: 15.2993, lng: 74.1240 },
+    'HARYANA': { lat: 29.0588, lng: 76.0856 },
+    'HIMACHAL PRADESH': { lat: 31.1048, lng: 77.1734 },
+    'JAMMU & KASHMIR': { lat: 33.7782, lng: 76.5762 },
+    'JHARKHAND': { lat: 23.6102, lng: 85.2799 },
+    'KERALA': { lat: 10.8505, lng: 76.2711 },
+    'MADHYA PRADESH': { lat: 22.9734, lng: 78.6569 },
+    'MEGHALAYA': { lat: 25.4670, lng: 91.3662 },
+    'ODISHA': { lat: 20.9517, lng: 85.0985 },
+    'TELANGANA': { lat: 18.1124, lng: 79.0193 },
+    'TRIPURA': { lat: 23.9408, lng: 91.9882 },
+    'UTTARAKHAND': { lat: 30.0668, lng: 79.0193 },
+    'ARUNACHAL PRADESH': { lat: 28.2180, lng: 94.7278 },
+    'MANIPUR': { lat: 24.6637, lng: 93.9063 },
+    'MIZORAM': { lat: 23.1645, lng: 92.9376 },
+    'NAGALAND': { lat: 26.1584, lng: 94.5624 },
+    'SIKKIM': { lat: 27.5330, lng: 88.5122 },
+    'CHANDIGARH': { lat: 30.7333, lng: 76.7794 },
   };
 
   const upperState = state.toUpperCase().trim();
-  return stateCoords[upperState] || { lat: 20.5937, lng: 78.9629 }; // Default to India center
+  return stateCoords[upperState] || { lat: 20.5937, lng: 78.9629 };
+}
+
+// Get district coordinates (approximate based on major districts)
+export function getDistrictCoordinates(state: string, district: string): { lat: number; lng: number } {
+  const districtCoords: Record<string, { lat: number; lng: number }> = {
+    'CHANDIGARH:CHANDIGARH': { lat: 30.7333, lng: 76.7794 },
+    'PUNJAB:MOHALI': { lat: 30.7046, lng: 76.7179 },
+    'PUNJAB:PATIALA': { lat: 30.3398, lng: 76.3869 },
+    'PUNJAB:LUDHIANA': { lat: 30.9010, lng: 75.8573 },
+    'HARYANA:GURGAON': { lat: 28.4595, lng: 77.0266 },
+    'HARYANA:FARIDABAD': { lat: 28.4089, lng: 77.3178 },
+    'DELHI:NEW DELHI': { lat: 28.6139, lng: 77.2090 },
+    'DELHI:SOUTH DELHI': { lat: 28.5244, lng: 77.1855 },
+    'UTTAR PRADESH:NOIDA': { lat: 28.5355, lng: 77.3910 },
+    'UTTAR PRADESH:LUCKNOW': { lat: 26.8467, lng: 80.9462 },
+    'MAHARASHTRA:MUMBAI': { lat: 19.0760, lng: 72.8777 },
+    'MAHARASHTRA:PUNE': { lat: 18.5204, lng: 73.8567 },
+    'KARNATAKA:BANGALORE': { lat: 12.9716, lng: 77.5946 },
+    'TAMIL NADU:CHENNAI': { lat: 13.0827, lng: 80.2707 },
+  };
+  
+  const key = `${state.toUpperCase().trim()}:${district.toUpperCase().trim()}`;
+  if (districtCoords[key]) {
+    return districtCoords[key];
+  }
+  
+  // If district not found, return state coordinates with small offset
+  const stateCoord = getStateCoordinates(state);
+  return {
+    lat: stateCoord.lat + (Math.random() - 0.5) * 0.5,
+    lng: stateCoord.lng + (Math.random() - 0.5) * 0.5
+  };
 }
