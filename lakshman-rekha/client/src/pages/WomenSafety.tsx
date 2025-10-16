@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DangerZoneMap } from "@/components/DangerZoneMap";
 import { EmergencyAlertModal } from "@/components/EmergencyAlertModal";
+import { PeriodicSafetyCheck } from "@/components/PeriodicSafetyCheck";
 import { useLocationSafety } from "@/hooks/use-location-safety";
 import { 
   Search, 
@@ -54,9 +55,12 @@ export default function WomenSafety() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
   const [showEmergencyAlert, setShowEmergencyAlert] = useState(false);
+  const [safeZones, setSafeZones] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const [crimeCurrentPage, setCrimeCurrentPage] = useState(1);
   const [locationTrackingEnabled, setLocationTrackingEnabled] = useState(false);
   const itemsPerPage = 10;
+  const crimeItemsPerPage = 12;
 
   // Fetch schemes from API
   const { data: allSchemes = [], isLoading: schemesLoading } = useQuery({
@@ -76,21 +80,26 @@ export default function WomenSafety() {
 
   // Automatically trigger emergency alert when entering danger zone
   useEffect(() => {
-    if (safetyStatus.isInDangerZone && !showEmergencyAlert) {
-      setShowEmergencyAlert(true);
+    if (safetyStatus.isInDangerZone && !showEmergencyAlert && safetyStatus.currentZone) {
+      const zoneKey = `${safetyStatus.currentZone.state}-${safetyStatus.currentZone.riskLevel}`;
       
-      // Send browser notification if permitted
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('⚠️ Danger Zone Alert', {
-          body: `You are entering ${safetyStatus.currentZone?.state} - a ${safetyStatus.currentZone?.riskLevel} risk area. Please confirm you are safe.`,
-          icon: '/icon.png',
-          badge: '/icon.png',
-          tag: 'danger-zone',
-          requireInteraction: true,
-        });
+      // Only show alert if user hasn't marked this zone as safe
+      if (!safeZones.has(zoneKey)) {
+        setShowEmergencyAlert(true);
+        
+        // Send browser notification if permitted
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('⚠️ Danger Zone Alert', {
+            body: `You are entering ${safetyStatus.currentZone?.state} - a ${safetyStatus.currentZone?.riskLevel} risk area. Please confirm you are safe.`,
+            icon: '/icon.png',
+            badge: '/icon.png',
+            tag: 'danger-zone',
+            requireInteraction: true,
+          });
+        }
       }
     }
-  }, [safetyStatus.isInDangerZone, showEmergencyAlert, safetyStatus.currentZone]);
+  }, [safetyStatus.isInDangerZone, showEmergencyAlert, safetyStatus.currentZone, safeZones]);
 
   // Filter schemes
   const filteredSchemes = (allSchemes as any[]).filter((scheme: any) => {
@@ -101,14 +110,21 @@ export default function WomenSafety() {
     return matchesSearch && matchesCategory;
   });
 
-  // Filter crime zones
-  const filteredCrimes = crimeZones.filter(zone => {
-    const matchesSearch = searchQuery === '' || 
-      zone.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (zone.district && zone.district.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesRisk = riskFilter === 'all' || zone.riskLevel === riskFilter;
-    return matchesSearch && matchesRisk;
-  });
+  // Filter crime zones with pagination
+  const filteredCrimes = crimeZones
+    .filter(zone => {
+      const matchesSearch = searchQuery === '' || 
+        zone.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (zone.district && zone.district.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesRisk = riskFilter === 'all' || zone.riskLevel === riskFilter;
+      return matchesSearch && matchesRisk;
+    })
+    .sort((a, b) => b.totalCrimes - a.totalCrimes);
+
+  // Pagination for crime zones
+  const totalCrimePages = Math.ceil(filteredCrimes.length / crimeItemsPerPage);
+  const startCrimeIndex = (crimeCurrentPage - 1) * crimeItemsPerPage;
+  const paginatedCrimes = filteredCrimes.slice(startCrimeIndex, startCrimeIndex + crimeItemsPerPage);
 
   // Pagination for schemes
   const totalSchemesPages = Math.ceil(filteredSchemes.length / itemsPerPage);
@@ -118,6 +134,7 @@ export default function WomenSafety() {
   // Reset to page 1 when filters change or tab changes
   useEffect(() => {
     setCurrentPage(1);
+    setCrimeCurrentPage(1);
     setSearchQuery('');
   }, [activeTab, categoryFilter, riskFilter]);
 
@@ -284,76 +301,126 @@ export default function WomenSafety() {
 
             {/* Crime Statistics Cards */}
             {!crimesLoading && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredCrimes.map((zone, index) => (
-                  <Card key={`${zone.state}-${zone.district || index}`} className="card-3d group relative overflow-hidden animate-slide-up hover-elevate" style={{animationDelay: `${index * 0.05}s`}} data-testid={`card-crime-${index}`}>
-                    <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <CardHeader className="space-y-3 relative z-10">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <CardTitle className="text-lg leading-tight">
-                            {zone.district ? `${zone.district}, ${zone.state}` : zone.state}
-                          </CardTitle>
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {paginatedCrimes.map((zone, index) => (
+                    <Card key={`${zone.state}-${zone.district || index}`} className="card-3d group relative overflow-hidden animate-slide-up hover-elevate" style={{animationDelay: `${index * 0.05}s`}} data-testid={`card-crime-${index}`}>
+                      <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <CardHeader className="space-y-3 relative z-10">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <CardTitle className="text-lg leading-tight">
+                              {zone.district ? `${zone.district}, ${zone.state}` : zone.state}
+                            </CardTitle>
+                          </div>
+                          <Badge variant={getRiskBadgeVariant(zone.riskLevel)} className="shrink-0">
+                            {zone.riskLevel.toUpperCase()}
+                          </Badge>
                         </div>
-                        <Badge variant={getRiskBadgeVariant(zone.riskLevel)} className="shrink-0">
-                          {zone.riskLevel.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <CardDescription className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4" />
-                        <span>Year: {zone.year}</span>
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4 relative z-10">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium">Total Crimes:</span>
-                          <span className="text-lg font-bold text-destructive">{(zone.totalCrimes || 0).toLocaleString()}</span>
-                        </div>
-                        <div className="h-px bg-border" />
-                        <div className="space-y-1 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Highest:</span>
-                            <span className="font-semibold">{zone.highestCrimeType || 'N/A'}</span>
+                        <CardDescription className="flex items-center gap-2">
+                          <TrendingUp className="w-4 h-4" />
+                          <span>Year: {zone.year}</span>
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4 relative z-10">
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium">Total Crimes:</span>
+                            <span className="text-lg font-bold text-destructive">{(zone.totalCrimes || 0).toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Count:</span>
-                            <span className="font-semibold">{(zone.highestCrimeCount || 0).toLocaleString()}</span>
+                          <div className="h-px bg-border" />
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Highest:</span>
+                              <span className="font-semibold">{zone.highestCrimeType || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Count:</span>
+                              <span className="font-semibold">{(zone.highestCrimeCount || 0).toLocaleString()}</span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="h-px bg-border" />
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <p className="text-muted-foreground">Rape</p>
-                            <p className="font-semibold">{zone.rape || 0}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Kidnapping</p>
-                            <p className="font-semibold">{zone.kidnapping || 0}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Domestic Violence</p>
-                            <p className="font-semibold">{zone.domesticViolence || 0}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Assault</p>
-                            <p className="font-semibold">{zone.assaultOnWomen || 0}</p>
+                          <div className="h-px bg-border" />
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Rape</p>
+                              <p className="font-semibold">{zone.rape || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Kidnapping</p>
+                              <p className="font-semibold">{zone.kidnapping || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Domestic Violence</p>
+                              <p className="font-semibold">{zone.domesticViolence || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Assault</p>
+                              <p className="font-semibold">{zone.assaultOnWomen || 0}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  ))}
 
-                {filteredCrimes.length === 0 && (
-                  <Card className="p-12 col-span-full">
-                    <div className="text-center space-y-2">
-                      <p className="text-lg font-semibold">No crime data found</p>
-                      <p className="text-muted-foreground">Try adjusting your search or filters</p>
+                  {paginatedCrimes.length === 0 && (
+                    <Card className="p-12 col-span-full">
+                      <div className="text-center space-y-2">
+                        <p className="text-lg font-semibold">No crime data found</p>
+                        <p className="text-muted-foreground">Try adjusting your search or filters</p>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+
+                {/* Crime Zones Pagination */}
+                {totalCrimePages > 1 && (
+                  <div className="flex items-center justify-between mt-6">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {startCrimeIndex + 1}-{Math.min(startCrimeIndex + crimeItemsPerPage, filteredCrimes.length)} of {filteredCrimes.length} states
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCrimeCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={crimeCurrentPage === 1}
+                        data-testid="button-crime-prev-page"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(5, totalCrimePages) }, (_, i) => {
+                          const page = i + 1;
+                          return (
+                            <Button
+                              key={page}
+                              variant={crimeCurrentPage === page ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setCrimeCurrentPage(page)}
+                              className="w-8 h-8 p-0"
+                              data-testid={`button-crime-page-${page}`}
+                            >
+                              {page}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCrimeCurrentPage(prev => Math.min(totalCrimePages, prev + 1))}
+                        disabled={crimeCurrentPage === totalCrimePages}
+                        data-testid="button-crime-next-page"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
                     </div>
-                  </Card>
+                  </div>
                 )}
-              </div>
+              </>
             )}
 
             {/* Danger Zone Map */}
@@ -505,9 +572,19 @@ export default function WomenSafety() {
         {/* Emergency Alert Modal */}
         <EmergencyAlertModal 
           open={showEmergencyAlert}
-          onClose={() => setShowEmergencyAlert(false)}
+          onClose={(markedSafe?: boolean) => {
+            setShowEmergencyAlert(false);
+            // If user marked themselves safe, add current zone to safe zones
+            if (markedSafe && safetyStatus.currentZone) {
+              const zoneKey = `${safetyStatus.currentZone.state}-${safetyStatus.currentZone.riskLevel}`;
+              setSafeZones(prev => new Set([...prev, zoneKey]));
+            }
+          }}
           location={safetyStatus.userLocation || { lat: 28.7041, lng: 77.1025 }}
         />
+        
+        {/* Periodic Safety Check */}
+        <PeriodicSafetyCheck enabled={locationTrackingEnabled} />
       </div>
     </div>
   );

@@ -2,33 +2,34 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocation } from "wouter";
 
 const slides = [
   {
     title: "Government Schemes for Women",
     description: "Access hundreds of empowerment schemes, financial assistance, and support programs",
-    bg: "from-primary/20 to-primary/5",
+    image: "/img/government scheme for women.jpg",
     cta: "Explore Schemes",
     link: "/women-safety"
   },
   {
     title: "Disaster Alert System",
     description: "Real-time weather forecasting and disaster zone mapping to keep you safe",
-    bg: "from-warning/20 to-warning/5",
+    image: "/img/Disaster alert system.png",
     cta: "View Alerts",
     link: "/disaster"
   },
   {
     title: "Smart Farming Intelligence",
     description: "AI-powered crop recommendations based on soil fertility and weather predictions",
-    bg: "from-safe/20 to-safe/5",
+    image: "/img/Smart Farming intelligence.png",
     cta: "Get Recommendations",
     link: "/farmers"
   },
   {
     title: "Danger Zone Alerts",
     description: "Stay informed about high-risk areas with real-time location-based notifications",
-    bg: "from-emergency/20 to-emergency/5",
+    image: "/img/Danger Zone Alerts.jpg",
     cta: "Enable Tracking",
     link: "/women-safety"
   }
@@ -37,13 +38,14 @@ const slides = [
 export function HeroSlider() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     if (!isAutoPlaying) return;
 
     const interval = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % slides.length);
-    }, 5000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [isAutoPlaying]);
@@ -64,7 +66,7 @@ export function HeroSlider() {
   };
 
   return (
-    <div className="relative w-full h-64 md:h-80 overflow-hidden rounded-lg">
+    <div className="relative w-full h-96 md:h-[500px] overflow-hidden rounded-lg">
       {/* Slides */}
       {slides.map((slide, index) => (
         <div
@@ -74,21 +76,30 @@ export function HeroSlider() {
             index === currentSlide ? "opacity-100" : "opacity-0"
           )}
         >
-          <div className={cn(
-            "w-full h-full bg-gradient-to-br flex items-center justify-center p-8",
-            slide.bg
-          )}>
-            <div className="max-w-3xl text-center space-y-4">
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                {slide.title}
-              </h2>
-              <p className="text-base md:text-lg text-muted-foreground">
-                {slide.description}
-              </p>
-              <Button size="lg" className="mt-4" data-testid={`button-slider-cta-${index}`}>
-                {slide.cta}
-                <ExternalLink className="w-4 h-4 ml-2" />
-              </Button>
+          <div className="relative w-full h-full">
+            <img 
+              src={slide.image} 
+              alt={slide.title}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-8">
+              <div className="max-w-3xl text-center space-y-4">
+                <h2 className="text-3xl md:text-4xl font-bold text-white">
+                  {slide.title}
+                </h2>
+                <p className="text-base md:text-lg text-white/90">
+                  {slide.description}
+                </p>
+                <Button 
+                  size="lg" 
+                  className="mt-4" 
+                  onClick={() => setLocation(slides[currentSlide].link)}
+                  data-testid={`button-slider-cta-${index}`}
+                >
+                  {slide.cta}
+                  <ExternalLink className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
             </div>
           </div>
         </div>

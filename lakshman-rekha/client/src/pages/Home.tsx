@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { WeatherWidget } from "@/components/WeatherWidget";
+import { ThreeScene } from "@/components/ThreeScene";
 
 export default function Home() {
   const { user } = useAuth();

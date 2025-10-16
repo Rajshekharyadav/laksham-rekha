@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 interface EmergencyAlertModalProps {
   open: boolean;
-  onClose: () => void;
+  onClose: (markedSafe?: boolean) => void;
   location?: { lat: number; lng: number };
 }
 
@@ -50,26 +50,49 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
 
   // Define triggerSOS before it's used in effects
   const triggerSOS = useCallback(() => {
-    // This would trigger actual emergency call
-    console.log('SOS TRIGGERED - Emergency services contacted');
-    alert('Emergency services have been notified. Help is on the way!');
+    // Trigger actual emergency call to 112
+    window.location.href = 'tel:112';
+    console.log('SOS TRIGGERED - Calling 112');
     onClose();
   }, [onClose]);
 
   useEffect(() => {
     if (countdown === 0 && !alarmActive) {
-      // Play police sound after countdown reaches zero
+      // Set alarm active first
+      setAlarmActive(true);
+    }
+  }, [countdown, alarmActive]);
+
+  // Play police sound when alarm becomes active
+  useEffect(() => {
+    if (alarmActive && !(window as any).emergencyAudio) {
       const audio = new Audio('/Police.mp3');
       audio.loop = true;
-      audio.play().catch(console.error);
+      audio.volume = 1.0;
+      
+      // Try to play immediately
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.error('Failed to play police sound:', err);
+          // Try alternative approach
+          audio.load();
+          setTimeout(() => audio.play().catch(console.error), 100);
+        });
+      }
       
       // Store audio reference to stop it later
       (window as any).emergencyAudio = audio;
       
-      // Set alarm active AFTER starting the audio
-      setAlarmActive(true);
+      // Stop audio after 20 seconds (matching auto SOS countdown)
+      setTimeout(() => {
+        if ((window as any).emergencyAudio) {
+          (window as any).emergencyAudio.pause();
+          (window as any).emergencyAudio = null;
+        }
+      }, 20000);
     }
-  }, [countdown, alarmActive]);
+  }, [alarmActive]);
 
   // Auto SOS escalation timer - triggers SOS call automatically after 20 seconds of alarm
   useEffect(() => {
@@ -94,7 +117,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
   const handleSafe = () => {
     setStatus('safe');
     setAutoSosCountdown(20); // Reset auto SOS countdown
-    setTimeout(() => onClose(), 1000);
+    setTimeout(() => onClose(true), 1000);
   };
 
   const handleNotSafe = () => {
@@ -104,8 +127,22 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
     if (!(window as any).emergencyAudio) {
       const audio = new Audio('/Police.mp3');
       audio.loop = true;
-      audio.play().catch(console.error);
+      audio.volume = 1.0;
+      audio.play().catch(err => {
+        console.error('Failed to play police sound:', err);
+        // Try alternative approach
+        audio.load();
+        audio.play().catch(console.error);
+      });
       (window as any).emergencyAudio = audio;
+      
+      // Stop audio after 30 seconds
+      setTimeout(() => {
+        if ((window as any).emergencyAudio) {
+          (window as any).emergencyAudio.pause();
+          (window as any).emergencyAudio = null;
+        }
+      }, 30000);
     }
     
     setAlarmActive(true);
@@ -119,7 +156,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
       (window as any).emergencyAudio.pause();
       (window as any).emergencyAudio = null;
     }
-    onClose();
+    onClose(true);
   };
 
   return (
@@ -127,7 +164,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
       <DialogContent 
         className={cn(
           "sm:max-w-md border-2",
-          alarmActive ? "border-emergency animate-pulse" : "border-warning"
+          alarmActive ? "border-emergency" : "border-warning"
         )}
         data-testid="modal-emergency-alert"
       >
@@ -135,7 +172,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
           <div className="flex items-center gap-3">
             <div className={cn(
               "w-12 h-12 rounded-full flex items-center justify-center",
-              alarmActive ? "bg-emergency/20 emergency-pulse" : "bg-warning/20"
+              alarmActive ? "bg-emergency/20" : "bg-warning/20"
             )}>
               <AlertTriangle className={cn(
                 "w-6 h-6",
@@ -170,7 +207,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
           {/* Alarm Active */}
           {alarmActive && status !== 'safe' && (
             <div className="text-center space-y-4">
-              <div className="text-2xl font-bold text-emergency emergency-pulse">
+              <div className="text-2xl font-bold text-emergency">
                 🚨 EMERGENCY ALARM 🚨
               </div>
               <div className="h-24 flex items-center justify-center">
@@ -179,8 +216,7 @@ export function EmergencyAlertModal({ open, onClose, location }: EmergencyAlertM
                     {[...Array(5)].map((_, i) => (
                       <div 
                         key={i} 
-                        className="w-3 h-12 bg-emergency rounded-sm animate-pulse"
-                        style={{ animationDelay: `${i * 0.1}s` }}
+                        className="w-3 h-12 bg-emergency rounded-sm"
                       />
                     ))}
                   </div>

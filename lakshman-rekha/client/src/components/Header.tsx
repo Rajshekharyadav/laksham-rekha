@@ -11,10 +11,13 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { AlertCircle, LogOut, User, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
+import { EmergencyContactsModal } from "@/components/EmergencyContactsModal";
 
 export function Header() {
   const { user, logout } = useAuth();
   const [darkMode, setDarkMode] = useState(false);
+  const [showEmergencyContacts, setShowEmergencyContacts] = useState(false);
 
   useEffect(() => {
     const isDark = localStorage.getItem('theme') === 'dark' || 
@@ -41,7 +44,9 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b bg-card backdrop-blur supports-[backdrop-filter]:bg-card/95">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <div className="flex items-center gap-6">
-          <h1 className="text-2xl font-bold text-primary">Sarthi</h1>
+          <Link href="/">
+            <h1 className="text-2xl font-bold text-primary cursor-pointer hover:text-primary/80 transition-colors">Sarthi</h1>
+          </Link>
           <p className="hidden md:block text-sm text-muted-foreground">AI Safety Net</p>
         </div>
 
@@ -51,6 +56,7 @@ export function Header() {
             variant="destructive" 
             size="default"
             className="h-11 font-semibold"
+            onClick={() => setShowEmergencyContacts(true)}
             data-testid="button-emergency-sos"
           >
             <AlertCircle className="w-5 h-5 mr-2" />
@@ -101,6 +107,12 @@ export function Header() {
           )}
         </div>
       </div>
+      
+      {/* Emergency Contacts Modal */}
+      <EmergencyContactsModal 
+        open={showEmergencyContacts}
+        onClose={() => setShowEmergencyContacts(false)}
+      />
     </header>
   );
 }
